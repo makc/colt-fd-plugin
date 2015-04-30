@@ -7,6 +7,8 @@ namespace ColtPlugin
     public class Settings
     {
         public string SecurityToken;
+        private bool autorun = true;
+        private string workingFolder = "colt";
 
         /// <summary> 
         /// Get and sets colt.exe path
@@ -14,20 +16,28 @@ namespace ColtPlugin
         [DisplayName("Path to COLT")]
         [Description("Path to COLT executable.")]
         public string Executable { get; set; }
-        
+
         /// <summary> 
         /// Get and sets colt folder
         /// </summary>
         [DisplayName("COLT Working Folder")]
         [Description("Path to COLT working folder."), DefaultValue("colt")]
-        public string WorkingFolder { get; set; }
+        public string WorkingFolder
+        {
+            get { return workingFolder; }
+            set { workingFolder = value; }
+        }
 
         /// <summary> 
         /// Get and sets full autorun flag
         /// </summary>
         [DisplayName("Automatically run COLT project")]
         [Description("Automatically compile and run COLT project after opening it in COLT."), DefaultValue(true)]
-        public bool AutoRun { get; set; }
+        public bool AutoRun
+        {
+            get { return autorun; }
+            set { autorun = value; }
+        }
 
         /// <summary> 
         /// Get and sets full config flag
