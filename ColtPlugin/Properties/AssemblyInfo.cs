@@ -12,7 +12,7 @@ using System.Runtime.CompilerServices;
 [assembly: AssemblyConfiguration("")]
 [assembly: AssemblyCompany("CodeOrchestra.com")]
 [assembly: AssemblyProduct("ColtPlugin")]
-[assembly: AssemblyCopyright("")]
+[assembly: AssemblyCopyright("CodeOrchestra.com 2013-2015")]
 [assembly: AssemblyTrademark("")]
 [assembly: AssemblyCulture("")]
 

@@ -1,55 +1,53 @@
 using System;
-using System.IO;
-using System.Diagnostics;
-using System.Drawing;
-using System.Windows.Forms;
 using System.Collections.Generic;
 using System.ComponentModel;
+using System.Drawing;
+using System.IO;
 using System.Reflection;
-using WeifenLuo.WinFormsUI.Docking;
+using System.Text.RegularExpressions;
+using System.Windows.Forms;
+using ASCompletion.Context;
+using ASCompletion.Model;
+using ColtPlugin.Forms;
 using ColtPlugin.Resources;
 using ColtPlugin.Rpc;
-using PluginCore.Localization;
-using PluginCore.Utilities;
-using PluginCore.Managers;
-using PluginCore.Helpers;
 using PluginCore;
-using ProjectManager.Controls;
+using PluginCore.Helpers;
+using PluginCore.Localization;
+using PluginCore.Managers;
+using PluginCore.Utilities;
 using ProjectManager.Controls.TreeView;
 using ProjectManager.Projects.AS3;
-using ASCompletion.Context;
-using System.Text.RegularExpressions;
-using ASCompletion.Model;
-using System.Xml;
-using System.Runtime.InteropServices;
+using ScintillaNet;
+using Timer = System.Timers.Timer;
 
 namespace ColtPlugin
 {
 	public class PluginMain : IPlugin
 	{
-        private String pluginName = "ColtPlugin";
-        private String pluginGuid = "12600B5B-D185-4171-A362-25C5F73548C6";
-        private String pluginHelp = "codeorchestra.zendesk.com/home/";
-        private String pluginDesc = "COLT FD Plugin";
-        private String pluginAuth = "Makc"; // as if
-        private String settingFilename;
-        private Settings settingObject;
-        private ToolStripMenuItem menuItem, assetFolderAddItem, assetFolderRemoveItem;
-        private ToolStripButton toolbarButton, toolbarButton2;
-        private FileSystemWatcher watcher;
-        private String pathToLog;
-        private System.Timers.Timer timer;
-        private Keys MakeItLiveKeys = Keys.Control | Keys.Shift | Keys.L;
-        private Boolean allowBuildInterception = true;
-        private int assetImageIndex = -1;
-        private TreeView projectTree;
+        string pluginName = "ColtPlugin";
+        string pluginGuid = "12600B5B-D185-4171-A362-25C5F73548C6";
+        string pluginHelp = "codeorchestra.zendesk.com/home/";
+        string pluginDesc = "COLT FD Plugin";
+        string pluginAuth = "Makc"; // as if
+        string settingFilename;
+        Settings settingObject;
+        ToolStripMenuItem menuItem, assetFolderAddItem, assetFolderRemoveItem;
+        ToolStripButton exportToColt, openInColt;
+        FileSystemWatcher watcher;
+        string pathToLog;
+        Timer timer;
+        Keys makeItLiveKeys = Keys.Control | Keys.Shift | Keys.L;
+        bool allowBuildInterception = true;
+        int assetImageIndex = -1;
+        TreeView projectTree;
 
 	    #region Required Properties
 
         /// <summary>
         /// Api level of the plugin
         /// </summary>
-        public Int32 Api
+        public int Api
         {
             get { return 1; }
         }
@@ -57,7 +55,7 @@ namespace ColtPlugin
         /// <summary>
         /// Name of the plugin
         /// </summary> 
-        public String Name
+        public string Name
 		{
 			get { return pluginName; }
 		}
@@ -65,7 +63,7 @@ namespace ColtPlugin
         /// <summary>
         /// GUID of the plugin
         /// </summary>
-        public String Guid
+        public string Guid
 		{
 			get { return pluginGuid; }
 		}
@@ -73,7 +71,7 @@ namespace ColtPlugin
         /// <summary>
         /// Author of the plugin
         /// </summary> 
-        public String Author
+        public string Author
 		{
 			get { return pluginAuth; }
 		}
@@ -81,7 +79,7 @@ namespace ColtPlugin
         /// <summary>
         /// Description of the plugin
         /// </summary> 
-        public String Description
+        public string Description
 		{
 			get { return pluginDesc; }
 		}
@@ -89,7 +87,7 @@ namespace ColtPlugin
         /// <summary>
         /// Web address for help
         /// </summary> 
-        public String Help
+        public string Help
 		{
 			get { return pluginHelp; }
 		}
@@ -98,7 +96,7 @@ namespace ColtPlugin
         /// Object that contains the settings
         /// </summary>
         [Browsable(false)]
-        public Object Settings
+        public object Settings
         {
             get { return settingObject; }
         }
@@ -107,20 +105,11 @@ namespace ColtPlugin
 		
 		#region Required Methods
 
-//        [DllImport("kernel32.dll", SetLastError = true)]
-//        [return: MarshalAs(UnmanagedType.Bool)]
-//        static extern bool AllocConsole();
-
-//        [DllImport("kernel32.dll", SetLastError = true)]
-//        [return: MarshalAs(UnmanagedType.Bool)]
-//        static extern bool FreeConsole();
-		
 		/// <summary>
 		/// Initializes the plugin
 		/// </summary>
 		public void Initialize()
 		{
-//            AllocConsole();
             InitBasics();
             LoadSettings();
             InitLocalization();
@@ -138,50 +127,48 @@ namespace ColtPlugin
 		/// <summary>
 		/// Handles the incoming events
 		/// </summary>
-		public void HandleEvent(Object sender, NotifyEvent e, HandlingPriority prority)
+		public void HandleEvent(object sender, NotifyEvent e, HandlingPriority priority)
 		{
             switch (e.Type)
             {
                 case EventType.UIStarted:
-                    DirectoryNode.OnDirectoryNodeRefresh += new DirectoryNodeRefresh(CreateAssetFoldersIcons);
+                    DirectoryNode.OnDirectoryNodeRefresh += CreateAssetFoldersIcons;
                     break;
 
                 case EventType.Command:
-                    string cmd = (e as DataEvent).Action;
-                    if (cmd == "ProjectManager.Project")
+                    string cmd = ((DataEvent) e).Action;
+                    switch (cmd)
                     {
-                        IProject project = PluginBase.CurrentProject;
-                        Boolean as3projectIsOpen = (project != null) && (project.Language == "as3");
-                        if (menuItem != null) menuItem.Enabled = as3projectIsOpen;
-                        if (toolbarButton != null) toolbarButton.Enabled = as3projectIsOpen;
-                        if (toolbarButton2 != null) toolbarButton2.Enabled = as3projectIsOpen && (GetCOLTFile() != null);
-                        // modified or new project - reconnect in any case
-                        WatchErrorsLog();
-                    }
-                    else if (cmd == "ProjectManager.Menu")
-                    {
-                        Object menu = (e as DataEvent).Data;
-                        CreateMenuItem(menu as ToolStripMenuItem);
-                    }
-                    else if (cmd == "ProjectManager.ToolBar")
-                    {
-                        Object toolStrip = (e as DataEvent).Data;
-                        toolbarButton = CreateToolbarButton(toolStrip as ToolStrip, "colt_save.png", "Menu.ExportToCOLT", OnClick);
-                        toolbarButton2 = CreateToolbarButton(toolStrip as ToolStrip, "colt_run.png", "Menu.OpenInCOLT", OnClick2);
-                    }
-                    else if ((cmd == "ProjectManager.BuildingProject") || (cmd == "ProjectManager.TestingProject"))
-                    {
-                        // todo: FD might send this for projects other than PluginBase.CurrentProject - figure out how to catch that
-                        if (settingObject.InterceptBuilds && allowBuildInterception && toolbarButton2.Enabled)
-                        {
-                            ProductionBuild(cmd == "ProjectManager.TestingProject");
-
-                            e.Handled = true;
-                        }
-                    }
-                    else if (cmd == "ProjectManager.TreeSelectionChanged")
-                    {
-                        CreateContextMenuItems();
+                        case "ProjectManager.Project":
+                            IProject project = PluginBase.CurrentProject;
+                            bool as3ProjectIsOpen = project != null && project.Language == "as3";
+                            if (menuItem != null) menuItem.Enabled = as3ProjectIsOpen;
+                            if (exportToColt != null) exportToColt.Enabled = as3ProjectIsOpen;
+                            if (openInColt != null) openInColt.Enabled = as3ProjectIsOpen && GetCOLTFile() != null;
+                            // modified or new project - reconnect in any case
+                            WatchErrorsLog();
+                            break;
+                        case "ProjectManager.Menu":
+                            object menu = ((DataEvent) e).Data;
+                            CreateMenuItem(menu as ToolStripMenuItem);
+                            break;
+                        case "ProjectManager.ToolBar":
+                            ToolStrip toolStrip = ((DataEvent)e).Data as ToolStrip;
+                            exportToColt = CreateToolbarButton(toolStrip, "colt_save.png", "Menu.ExportToCOLT", OnExportToColt);
+                            openInColt = CreateToolbarButton(toolStrip, "colt_run.png", "Menu.OpenInCOLT", OnOpenInColt);
+                            break;
+                        case "ProjectManager.BuildingProject":
+                        case "ProjectManager.TestingProject":
+                            // todo: FD might send this for projects other than PluginBase.CurrentProject - figure out how to catch that
+                            if (settingObject.InterceptBuilds && allowBuildInterception && openInColt.Enabled)
+                            {
+                                ProductionBuild(cmd == "ProjectManager.TestingProject");
+                                e.Handled = true;
+                            }
+                            break;
+                        case "ProjectManager.TreeSelectionChanged":
+                            CreateContextMenuItems();
+                            break;
                     }
                     break;
                 
@@ -191,7 +178,7 @@ namespace ColtPlugin
 
                 case EventType.Keys: // shortcut pressed
                     KeyEvent ke = (KeyEvent)e;
-                    if (ke.Value == MakeItLiveKeys)
+                    if (ke.Value == makeItLiveKeys)
                     {
                         ke.Handled = true;
                         MakeItLive();
@@ -202,7 +189,7 @@ namespace ColtPlugin
                     DataEvent de = (DataEvent)e;
                     if (de.Action == "ColtPlugin.MakeItLive")
                     {
-                        MakeItLiveKeys = (Keys)de.Data;
+                        makeItLiveKeys = (Keys)de.Data;
                     }
                     break;
 
@@ -218,7 +205,7 @@ namespace ColtPlugin
         /// </summary>
         public void InitBasics()
         {
-            String dataPath = Path.Combine(PathHelper.DataDir, "ColtPlugin");
+            string dataPath = Path.Combine(PathHelper.DataDir, "ColtPlugin");
             if (!Directory.Exists(dataPath)) Directory.CreateDirectory(dataPath);
             settingFilename = Path.Combine(dataPath, "Settings.fdb");
         }
@@ -252,29 +239,26 @@ namespace ColtPlugin
         {
             EventManager.AddEventHandler(this, EventType.UIStarted, HandlingPriority.High);
             EventManager.AddEventHandler(this, EventType.Command | EventType.FileSave | EventType.Keys | EventType.Shortcut);
-
-            watcher = new FileSystemWatcher();
-            watcher.NotifyFilter = NotifyFilters.LastWrite;
+            watcher = new FileSystemWatcher {NotifyFilter = NotifyFilters.LastWrite};
             watcher.Changed += OnFileChange;
-
-            PluginBase.MainForm.RegisterShortcutItem("ColtPlugin.MakeItLive", MakeItLiveKeys);
+            PluginBase.MainForm.RegisterShortcutItem("ColtPlugin.MakeItLive", makeItLiveKeys);
         }
 
         #endregion
 
         #region GetImage() stuff
 
-        private static Dictionary<String, Bitmap> imageCache = new Dictionary<string, Bitmap>();
+        static Dictionary<string, Bitmap> imageCache = new Dictionary<string, Bitmap>();
 
         /// <summary>
         /// Gets embedded image from resources
         /// </summary>
-        private static Image GetImage(String imageName)
+        static Image GetImage(string imageName)
         {
             if (!imageCache.ContainsKey(imageName))
             {
                 Assembly assembly = Assembly.GetExecutingAssembly();
-                imageCache.Add(imageName, new Bitmap(assembly.GetManifestResourceStream("ColtPlugin.Resources." + imageName)));
+                imageCache.Add(imageName, new Bitmap(assembly.GetManifestResourceStream(string.Format("ColtPlugin.Resources.{0}", imageName))));
             }
 
             return imageCache[imageName];
@@ -284,20 +268,17 @@ namespace ColtPlugin
 
         #region Menu items stuff
 
-        private void CreateAssetFoldersIcons(DirectoryNode node)
+        void CreateAssetFoldersIcons(DirectoryNode node)
         {
             // we are going to save TreeView reference once we saw it
             // this hack comes from SourceControl's OverlayManager :S
             projectTree = node.TreeView;
-
             ImageList list = projectTree.ImageList;
             if (assetImageIndex < 0)
             {
                 assetImageIndex = list.Images.Count;
-                //list.Images.Add(GetImage("colt_assets_folder.png"));
                 list.Images.Add(PluginBase.MainForm.FindImage("520"));
             }
-
             if (IsAssetFolder(node.BackingPath))
             {
                 node.ImageIndex = assetImageIndex;
@@ -305,16 +286,17 @@ namespace ColtPlugin
             }
         }
 
-        private void CreateContextMenuItems()
+        void CreateContextMenuItems()
         {
             if (assetFolderAddItem == null)
             {
                 //assetFolderAddItem = new ToolStripMenuItem(LocaleHelper.GetString("ContextMenu.AssetFolderAdd"), GetImage("colt_assets.png"));
                 assetFolderAddItem = new ToolStripMenuItem(LocaleHelper.GetString("ContextMenu.AssetFolderAdd"), PluginBase.MainForm.FindImage("336"));
                 assetFolderAddItem.Click += OnAssetAddOrRemoveClick;
-
-                assetFolderRemoveItem = new ToolStripMenuItem(LocaleHelper.GetString("ContextMenu.AssetFolderRemove"));
-                assetFolderRemoveItem.Checked = true;
+                assetFolderRemoveItem = new ToolStripMenuItem(LocaleHelper.GetString("ContextMenu.AssetFolderRemove"))
+                {
+                    Checked = true
+                };
                 assetFolderRemoveItem.Click += OnAssetAddOrRemoveClick;
             }
 
@@ -325,54 +307,55 @@ namespace ColtPlugin
                 {
                     // good to go - insert after 1st separator
                     ContextMenuStrip menu = projectTree.ContextMenuStrip;
-
-                    Int32 index = 0;
+                    int index = 0;
                     while (index < menu.Items.Count)
                     {
-                        index++; if (menu.Items[index - 1] is ToolStripSeparator) break;
+                        index++;
+                        if (menu.Items[index - 1] is ToolStripSeparator) break;
                     }
-
                     menu.Items.Insert(index, IsAssetFolder(node.BackingPath) ? assetFolderRemoveItem : assetFolderAddItem);
                 }
             }
         }
 
-        private void OnAssetAddOrRemoveClick(Object sender, EventArgs e)
+        void OnAssetAddOrRemoveClick(object sender, EventArgs e)
         {
             DirectoryNode node = projectTree.SelectedNode as DirectoryNode;
             if (node != null)
             {
-                List<String> assets = new List<String>(AssetFolders);
+                List<string> assets = new List<string>(AssetFolders);
                 if (assets.Contains(node.BackingPath)) assets.Remove(node.BackingPath); else assets.Add(node.BackingPath);
                 AssetFolders = assets.ToArray();
                 node.Refresh(false);
             }
         }
 
-        private void CreateMenuItem(ToolStripMenuItem projectMenu)
+        void CreateMenuItem(ToolStripMenuItem projectMenu)
         {
-            menuItem = new ToolStripMenuItem(LocaleHelper.GetString("Menu.ExportToCOLT"), GetImage("colt_save.png"), OnClick, null);
-            menuItem.Enabled = false;
+            menuItem = new ToolStripMenuItem(LocaleHelper.GetString("Menu.ExportToCOLT"), GetImage("colt_save.png"),
+                OnExportToColt, null) {Enabled = false};
             projectMenu.DropDownItems.Add(menuItem);
         }
 
-        private ToolStripButton CreateToolbarButton(ToolStrip toolStrip, String image, String hint, EventHandler handler)
+        ToolStripButton CreateToolbarButton(ToolStrip toolStrip, string image, string hint, EventHandler handler)
         {
-            ToolStripButton button = new ToolStripButton();
-            button.Image = GetImage(image);
-            button.Text = LocaleHelper.GetString(hint);
-            button.DisplayStyle = ToolStripItemDisplayStyle.Image;
+            ToolStripButton button = new ToolStripButton
+            {
+                Image = GetImage(image),
+                Text = LocaleHelper.GetString(hint),
+                DisplayStyle = ToolStripItemDisplayStyle.Image
+            };
             button.Click += handler;
             toolStrip.Items.Add(button);
             return button;
         }
 
-        private void OnClick(Object sender, EventArgs e)
+        void OnExportToColt(object sender, EventArgs e)
         {
             ExportAndOpen(settingObject.AutoRun);
         }
 
-        private void OnClick2(Object sender, EventArgs e)
+        void OnOpenInColt(object sender, EventArgs e)
         {
             FindAndOpen(settingObject.AutoRun);
         }
@@ -386,10 +369,8 @@ namespace ColtPlugin
         /// </summary>
         public void LoadSettings()
         {
-            string defaultExe = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles) + @"\COLT\colt.exe";
-
+            string defaultExe = string.Format("{0}\\COLT\\colt.exe", Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles));
             settingObject = new Settings();
-
             if (!File.Exists(settingFilename))
             {
                 settingObject.Executable = defaultExe;
@@ -397,12 +378,8 @@ namespace ColtPlugin
             }
             else
             {
-                Object obj = ObjectSerializer.Deserialize(settingFilename, settingObject);
-                settingObject = (Settings)obj;
-// debug
-//settingObject.SecurityToken = null;
-                string exe = settingObject.Executable;
-                if ((exe == null) || (exe.Length == 0))
+                settingObject = (Settings)ObjectSerializer.Deserialize(settingFilename, settingObject);
+                if (string.IsNullOrEmpty(settingObject.Executable))
                 {
                     settingObject.Executable = defaultExe;
                     SaveSettings();
@@ -421,36 +398,29 @@ namespace ColtPlugin
         /// <summary>
         /// Convenience property to get or set asset folders todo: extract this into something nice
         /// </summary>
-        private String[] AssetFolders
+        string[] AssetFolders
         {
             get
             {
                 AS3Project project = PluginBase.CurrentProject as AS3Project;
-
-                if ((project != null) && project.Storage.ContainsKey("colt.assets"))
+                if (project != null && project.Storage.ContainsKey("colt.assets"))
                 {
                     return project.Storage["colt.assets"].Split('|');
                 }
-
-                return new String[] { };
+                return new string[] { };
             }
-
             set
             {
                 AS3Project project = PluginBase.CurrentProject as AS3Project;
-
-                if (project != null)
-                {
-                    project.Storage["colt.assets"] = String.Join("|", value);
-
-                    project.Save();
-                }
+                if (project == null) return;
+                project.Storage["colt.assets"] = string.Join("|", value);
+                project.Save();
             }
         }
 
-        private Boolean IsAssetFolder(String path)
+        bool IsAssetFolder(string path)
         {
-            return (Array.IndexOf<String>(AssetFolders, path) >= 0);
+            return Array.IndexOf(AssetFolders, path) >= 0;
         }
 
 		#endregion
@@ -460,60 +430,53 @@ namespace ColtPlugin
         /// <summary>
         /// Watches for COLT compilation errors log (optionally creates COLT folder if it does not exist)
         /// </summary>
-        private void WatchErrorsLog(Boolean createFolder = false)
+        void WatchErrorsLog(bool createFolder = false)
         {
             // shut down errors log watcher and its timer
             watcher.EnableRaisingEvents = false;
-            if (timer != null) { timer.Stop(); timer = null; }
-
+            if (timer != null)
+            {
+                timer.Stop();
+                timer = null;
+            }
             // create the folder and subscribe to errors log updates
             IProject project = PluginBase.CurrentProject;
             if (project == null) return;
-
-            String coltFolderPath = project.GetAbsolutePath(settingObject.WorkingFolder);
+            string coltFolderPath = project.GetAbsolutePath(settingObject.WorkingFolder);
             if (createFolder && !Directory.Exists(coltFolderPath)) Directory.CreateDirectory(coltFolderPath);
-
-            if (Directory.Exists(coltFolderPath))
-            {
-                pathToLog = Path.Combine(coltFolderPath, "compile_errors.log");
-                watcher.Path = coltFolderPath;
-                watcher.EnableRaisingEvents = true;
-            }
+            if (!Directory.Exists(coltFolderPath)) return;
+            pathToLog = Path.Combine(coltFolderPath, "compile_errors.log");
+            watcher.Path = coltFolderPath;
+            watcher.EnableRaisingEvents = true;
         }
 
-        private void OnFileChange(Object sender, FileSystemEventArgs e)
+        void OnFileChange(object sender, FileSystemEventArgs e)
         {
-            if (e.FullPath.EndsWith("compile_errors.log"))
+            if (!e.FullPath.EndsWith("compile_errors.log") || timer != null) return;
+            timer = new Timer
             {
-                if (timer == null)
-                {
-                    timer = new System.Timers.Timer();
-                    timer.SynchronizingObject = (Form)PluginBase.MainForm; // thread safe
-                    timer.Interval = 200;
-                    timer.Elapsed += OnTimerElapsed;
-                    timer.Enabled = true;
-                    timer.Start();
-                }
-            }
+                SynchronizingObject = (Form) PluginBase.MainForm,
+                Interval = 200
+            };
+            // thread safe
+            timer.Elapsed += OnTimerElapsed;
+            timer.Enabled = true;
+            timer.Start();
         }
 
-        private void OnTimerElapsed(object sender, EventArgs e)
+	    void OnTimerElapsed(object sender, EventArgs e)
         {
             timer.Stop();
             timer = null;
-
             ClearErrors();
-
-            String message = File.ReadAllText(pathToLog);
-
+            string message = File.ReadAllText(pathToLog);
             // COLT copies sources to "incremental" folder, so let's try to find correct path and patch the output
-            String incremental = "colt\\incremental";
-            String[] sources = PluginBase.CurrentProject.SourcePaths;
-
+            string incremental = "colt\\incremental";
+            string[] sources = PluginBase.CurrentProject.SourcePaths;
             // send the log line by line
-            String[] messageLines = message.Split(new Char[] {'\r', '\n'});
+            string[] messageLines = message.Split('\r', '\n');
             bool hasErrors = false;
-            foreach (String line in messageLines) if (line.Length > 0)
+            foreach (string line in messageLines) if (line.Length > 0)
             {
                 int errorLevel = -3;
                 if (line.Contains(incremental))
@@ -521,22 +484,19 @@ namespace ColtPlugin
                     try
                     {
                         // carefully take the file name out
-                        String file = line.Substring(0, line.IndexOf("): col"));
+                        string file = line.Substring(0, line.IndexOf("): col"));
                         file = file.Substring(0, file.LastIndexOf("("));
                         file = file.Substring(file.IndexOf(incremental) + incremental.Length + 1);
-
                         // look for it in all source folders
-                        for (int i = 0; i < sources.Length; i++)
+                        foreach (string it in sources)
                         {
-                            if (File.Exists(PluginBase.CurrentProject.GetAbsolutePath(Path.Combine(sources[i], file))))
-                            {
-                                TraceManager.Add(line.Replace(incremental, sources[i]), errorLevel);
-                                hasErrors = true;
-                                break;
-                            }
+                            if (!File.Exists(PluginBase.CurrentProject.GetAbsolutePath(Path.Combine(it, file))))
+                                continue;
+                            TraceManager.Add(line.Replace(incremental, it), errorLevel);
+                            hasErrors = true;
+                            break;
                         }
                     }
-
                     catch (Exception)
                     {
                         // unexpected format, send as is
@@ -553,12 +513,12 @@ namespace ColtPlugin
             if (hasErrors) ShowErrors();
         }
 
-        private void ClearErrors()
+        void ClearErrors()
         {
             EventManager.DispatchEvent(this, new DataEvent(EventType.Command, "ResultsPanel.ClearResults", null));
         }
 
-        private void ShowErrors()
+        void ShowErrors()
         {
             // should be an option: if the panel was hidden it captures keyboard focus
             //EventManager.DispatchEvent(this, new DataEvent(EventType.Command, "ResultsPanel.ShowResults", null));
@@ -571,13 +531,12 @@ namespace ColtPlugin
         /// <summary>
         /// Generate meta tags
         /// </summary>
-        private void MakeItLive()
+        void MakeItLive()
         {
-            ScintillaNet.ScintillaControl sci = PluginBase.MainForm.CurrentDocument.SciControl;
-            if (sci == null) 
-                return;
+            ScintillaControl sci = PluginBase.MainForm.CurrentDocument.SciControl;
+            if (sci == null) return;
 
-            IASContext context = ASCompletion.Context.ASContext.Context;
+            IASContext context = ASContext.Context;
             if (context.CurrentClass == null || context.CurrentClass.IsVoid() || context.CurrentClass.LineFrom == 0) 
                 return;
 
@@ -593,7 +552,7 @@ namespace ColtPlugin
                 line = context.CurrentMember.LineFrom;
                 indent = LineIndentPosition(sci, line);
                 pos = sci.PositionFromLine(line) + indent.Length;
-                string insert = "[LiveCodeUpdateListener(method=\"" + member.Name + "\")]\n" + indent;
+                string insert = string.Format("[LiveCodeUpdateListener(method=\"{0}\")]\n{1}", member.Name, indent);
                 sci.SetSel(pos, pos);
                 sci.ReplaceSel(insert);
                 originalPos += insert.Length;
@@ -605,7 +564,7 @@ namespace ColtPlugin
                 line = context.CurrentClass.LineFrom;
                 indent = LineIndentPosition(sci, line);
                 pos = sci.PositionFromLine(line) + indent.Length;
-                string insert = "[Live]\n" + indent;
+                string insert = string.Format("[Live]\n{0}", indent);
                 sci.SetSel(pos, pos);
                 sci.ReplaceSel(insert);
                 originalPos += insert.Length;
@@ -614,7 +573,7 @@ namespace ColtPlugin
             sci.SetSel(originalPos, originalPos);
         }
 
-        private string LineIndentPosition(ScintillaNet.ScintillaControl sci, int line)
+        string LineIndentPosition(ScintillaControl sci, int line)
         {
             string txt = sci.GetLine(line);
             for (int i = 0; i < txt.Length; i++)
@@ -624,99 +583,81 @@ namespace ColtPlugin
 
         #endregion
 
-        private void GetSecurityToken()
+        void GetSecurityToken()
         {
             // we expect this file to be open by now
             // because we get here from auth exception
-            String coltFileName = GetCOLTFile();
-
-            if (coltFileName != null)
+            string coltFileName = GetCOLTFile();
+            if (coltFileName == null) return;
+            try
             {
-                try
+                JsonRpcClient client = new JsonRpcClient(coltFileName);
+                // knock
+                client.Invoke("requestShortCode", "FlashDevelop");
+
+                // if still here, user needs to enter the code
+                FirstTimeDialog dialog = new FirstTimeDialog(settingObject.InterceptBuilds, settingObject.AutoRun);
+                dialog.ShowDialog();
+                // regardless of the code, set boolean options
+                settingObject.AutoRun = dialog.AutoRun;
+                settingObject.InterceptBuilds = dialog.InterceptBuilds;
+                if (dialog.ShortCode != null && dialog.ShortCode.Length == 4)
                 {
-                    JsonRpcClient client = new JsonRpcClient(coltFileName);
-                    // knock
-                    client.Invoke("requestShortCode", new Object[] { "FlashDevelop" /*LocaleHelper.GetString("Info.Description").TrimEnd(new Char[] { '.' })*/ });
-
-                    // if still here, user needs to enter the code
-                    Forms.FirstTimeDialog dialog = new Forms.FirstTimeDialog(settingObject.InterceptBuilds, settingObject.AutoRun);
-                    dialog.ShowDialog();
-
-                    // regardless of the code, set boolean options
-                    settingObject.AutoRun = dialog.AutoRun;
-                    settingObject.InterceptBuilds = dialog.InterceptBuilds;
-
-                    if ((dialog.ShortCode != null) && (dialog.ShortCode.Length == 4))
-                    {
-                        // short code looks right - request security token
-                        settingObject.SecurityToken = client.Invoke("obtainAuthToken", new Object[] { dialog.ShortCode }).ToString();
-                    }
+                    // short code looks right - request security token
+                    settingObject.SecurityToken = client.Invoke("obtainAuthToken", dialog.ShortCode).ToString();
                 }
-
-                catch (Exception details)
-                {
-                    HandleAuthenticationExceptions(details);
-                }
+            }
+            catch (Exception details)
+            {
+                HandleAuthenticationExceptions(details);
             }
         }
 
         /// <summary>
         /// Makes production build and optionally runs its output
         /// </summary>
-        private void ProductionBuild(Boolean run)
+        void ProductionBuild(bool run)
         {
             // make sure the COLT project is open
-            String path = FindAndOpen(false);
-
-            if (path != null)
+            string path = FindAndOpen(false);
+            if (path == null) return;
+            try
             {
-                try
+                JsonRpcClient client = new JsonRpcClient(path);
+                client.PingOrRunCOLT(settingObject.Executable);
+                // leverage FD launch mechanism
+                if (run)
                 {
-                    JsonRpcClient client = new JsonRpcClient(path);
-                    client.PingOrRunCOLT(settingObject.Executable);
-
-                    // leverage FD launch mechanism
-                    if (run)
-                    {
-                        client.InvokeAsync("runProductionCompilation", RunAfterProductionBuild, new Object[] { settingObject.SecurityToken, /*run*/false });
-                    }
-                    else
-                    {
-                        client.InvokeAsync("runProductionCompilation", HandleAuthenticationExceptions, new Object[] { settingObject.SecurityToken, /*run*/false });
-                    }
+                    client.InvokeAsync("runProductionCompilation", RunAfterProductionBuild, settingObject.SecurityToken, false);
                 }
-                catch (Exception details)
+                else
                 {
-                    HandleAuthenticationExceptions(details);
+                    client.InvokeAsync("runProductionCompilation", HandleAuthenticationExceptions, settingObject.SecurityToken, false);
                 }
+            }
+            catch (Exception details)
+            {
+                HandleAuthenticationExceptions(details);
             }
         }
 
-        private void RunAfterProductionBuild(Object result)
+        void RunAfterProductionBuild(object result)
         {
             Exception exception = result as Exception;
-            if (exception != null)
-            {
-                HandleAuthenticationExceptions(exception);
-            }
-            else
-            {
-                EventManager.DispatchEvent(this, new DataEvent(EventType.Command, "ProjectManager.PlayOutput", null));
-            }
+            if (exception != null) HandleAuthenticationExceptions(exception);
+            else EventManager.DispatchEvent(this, new DataEvent(EventType.Command, "ProjectManager.PlayOutput", null));
         }
 
         /// <summary>
         /// Opens the project in COLT and optionally runs live session
         /// </summary>
-        private String FindAndOpen(Boolean run)
+        string FindAndOpen(bool run)
         {
             // Create COLT subfolder if does not exist yet
             // While at that, start listening for colt/compile_errors.log changes
             WatchErrorsLog(true);
-
             // Find COLT project to open
-            String coltFileName = GetCOLTFile();
-
+            string coltFileName = GetCOLTFile();
             // Open it
             if (coltFileName != null)
             {
@@ -726,9 +667,8 @@ namespace ColtPlugin
                     {
                         JsonRpcClient client = new JsonRpcClient(coltFileName);
                         client.PingOrRunCOLT(settingObject.Executable);
-                        client.InvokeAsync("runBaseCompilation", HandleAuthenticationExceptions, new Object[] { settingObject.SecurityToken });
+                        client.InvokeAsync("runBaseCompilation", HandleAuthenticationExceptions, settingObject.SecurityToken);
                     }
-
                     return coltFileName;
                 }
                 catch (Exception details)
@@ -737,109 +677,88 @@ namespace ColtPlugin
                     return null;
                 }
             }
-
-            else
-            {
-                toolbarButton2.Enabled = false;
-                return null;
-            }
-
+            openInColt.Enabled = false;
+            return null;
         }
 
         /// <summary>
         /// Exports the project to COLT and optionally runs live session
         /// </summary>
-        private void ExportAndOpen(Boolean run)
+        void ExportAndOpen(bool run)
         {
             // Create COLT subfolder if does not exist yet
             // While at that, start listening for colt/compile_errors.log changes
             WatchErrorsLog(true);
-
             // Create COLT project in it
             COLTRemoteProject project = ExportCOLTProject();
-            if (project != null)
+            if (project == null) return;
+            try
             {
-                try
+                // Export the project as xml file
+                project.Save();
+                // Optionally run base compilation
+                if (run)
                 {
-                    // Export the project as xml file
-                    project.Save();
-
-                    // Optionally run base compilation
-                    if (run)
+                    JsonRpcClient client = new JsonRpcClient(project.path);
+                    client.PingOrRunCOLT(settingObject.Executable);
+                    client.InvokeAsync("runBaseCompilation", HandleAuthenticationExceptions, settingObject.SecurityToken);
+                }
+                openInColt.Enabled = true;
+                // Remove older *.colt files
+                foreach (string oldFile in Directory.GetFiles(Path.GetDirectoryName(project.path), "*.colt"))
+                {
+                    if (!project.path.Contains(Path.GetFileName(oldFile)))
                     {
-                        JsonRpcClient client = new JsonRpcClient(project.path);
-                        client.PingOrRunCOLT(settingObject.Executable);
-                        client.InvokeAsync("runBaseCompilation", HandleAuthenticationExceptions, new Object[] { settingObject.SecurityToken });
-                    }
-
-                    // Enable "open" button
-                    toolbarButton2.Enabled = true;
-
-                    // Remove older *.colt files
-                    foreach (String oldFile in Directory.GetFiles(Path.GetDirectoryName(project.path), "*.colt"))
-                    {
-                        if (!project.path.Contains(Path.GetFileName(oldFile)))
-                        {
-                            File.Delete(oldFile);
-                        }
+                        File.Delete(oldFile);
                     }
                 }
-                catch (Exception details)
-                {
-                    HandleAuthenticationExceptions(details);
-                }
+            }
+            catch (Exception details)
+            {
+                HandleAuthenticationExceptions(details);
             }
         }
 
         /// <summary>
         /// Handles possible authentication exceptions
         /// </summary>
-        private void HandleAuthenticationExceptions(object param)
+        void HandleAuthenticationExceptions(object param)
         {
             Exception exception = param as Exception;
-            if (exception != null)
+            if (exception == null) return;
+            JsonRpcException rpcException = exception as JsonRpcException;
+            if (rpcException != null)
             {
-                JsonRpcException rpcException = exception as JsonRpcException;
-                if (rpcException != null)
+                // if the exception comes from rpc, we have two special situations to handle:
+                // 1 short code was wrong (might happen a lot)
+                // 2 security token was wrong (should never happen)
+                // in both cases, we need to request new security token
+                if ((rpcException.TypeName == "codeOrchestra.colt.core.rpc.security.InvalidShortCodeException") ||
+                    (rpcException.TypeName == "codeOrchestra.colt.core.rpc.security.InvalidAuthTokenException"))
                 {
-                    // if the exception comes from rpc, we have two special situations to handle:
-                    // 1 short code was wrong (might happen a lot)
-                    // 2 security token was wrong (should never happen)
-                    // in both cases, we need to request new security token
-                    if ((rpcException.TypeName == "codeOrchestra.colt.core.rpc.security.InvalidShortCodeException") ||
-                        (rpcException.TypeName == "codeOrchestra.colt.core.rpc.security.InvalidAuthTokenException"))
-                    {
-                        settingObject.SecurityToken = null;
+                    settingObject.SecurityToken = null;
                         
-                        // request new security token immediately
-                        GetSecurityToken();
-                    }
-                }
-
-                else
-                {
-                    TraceManager.Add(exception.ToString(), -1);
+                    // request new security token immediately
+                    GetSecurityToken();
                 }
             }
+            else TraceManager.Add(exception.ToString(), -1);
         }
 
         /// <summary>
         /// Returns path to existing COLT project or null.
         /// </summary>
-        private String GetCOLTFile()
+        string GetCOLTFile()
         {
             IProject project = PluginBase.CurrentProject;
-
             try
             {
-                String[] files = Directory.GetFiles(project.GetAbsolutePath(settingObject.WorkingFolder), "*.colt");
+                string[] files = Directory.GetFiles(project.GetAbsolutePath(settingObject.WorkingFolder), "*.colt");
                 if (files.Length > 0) return files[0];
             }
-
             catch (Exception)
             {
             }
-
             return null;
         }
 
@@ -847,114 +766,96 @@ namespace ColtPlugin
         /// Exports FD project setting to COLTRemoteProject instance.
         /// </summary>
         /// <returns></returns>
-        private COLTRemoteProject ExportCOLTProject()
+        COLTRemoteProject ExportCOLTProject()
         {
             // our options: parse project.ProjectPath (xml file) or use api
             AS3Project project = (AS3Project)PluginBase.CurrentProject;
-
-            String configCopy = "";
+            string configCopy = "";
             if (settingObject.FullConfig)
             {
                 // Construct flex config file name (see AS3ProjectBuilder, line 140)
-                String projectName = project.Name.Replace(" ", "");
-                String configFile = Path.Combine("obj", projectName + "Config.xml");
-
+                string projectName = project.Name.Replace(" ", "");
+                string configFile = Path.Combine("obj", string.Format("{0}Config.xml", projectName));
                 if (!File.Exists(project.GetAbsolutePath(configFile)))
                 {
-                    TraceManager.Add("Required file (" + projectName + "Config.xml) does not exist, project must be built first...", -1);
-
+                    TraceManager.Add(string.Format("Required file ({0}Config.xml) does not exist, project must be built first...", projectName), -1);
                     try
                     {
                         allowBuildInterception = false;
                         EventManager.DispatchEvent(this, new DataEvent(EventType.Command, "ProjectManager.BuildProject", null));
                     }
-
                     finally
                     {
                         allowBuildInterception = true;
                     }
-
                     return null;
                 }
-
                 // Create config copy with <file-specs>...</file-specs> commented out
-                configCopy = Path.Combine("obj", projectName + "ConfigCopy.xml");
+                configCopy = Path.Combine("obj", string.Format("{0}ConfigCopy.xml", projectName));
                 File.WriteAllText(project.GetAbsolutePath(configCopy),
                     File.ReadAllText(project.GetAbsolutePath(configFile))
                         .Replace("<file-specs", "<!-- file-specs")
                         .Replace("/file-specs>", "/file-specs -->"));
             }
-
-
             // Export COLT project
-            COLTRemoteProject result = new COLTRemoteProject();
-
-            result.path = project.GetAbsolutePath(Path.Combine(settingObject.WorkingFolder, System.Guid.NewGuid() + ".colt"));
-
-            result.name = project.Name;
-
-            List<String> libraryPathsList = new List<String>(project.CompilerOptions.LibraryPaths);
+            COLTRemoteProject result = new COLTRemoteProject
+            {
+                path = project.GetAbsolutePath(Path.Combine(settingObject.WorkingFolder, string.Format("{0}.colt", System.Guid.NewGuid()))),
+                name = project.Name
+            };
+            List<string> libraryPathsList = new List<string>(project.CompilerOptions.LibraryPaths);
             for (int i=0; i<libraryPathsList.Count; i++)
             {
                 if (libraryPathsList[i].ToLower().EndsWith(".swc"))
                 {
-                    libraryPathsList[i] = @"..\" + libraryPathsList[i];
+                    libraryPathsList[i] = string.Format(@"..\{0}", libraryPathsList[i]);
                 }
-
                 else
                 {
                     // workaround (FD saves empty paths for missing libs)
-                    libraryPathsList.RemoveAt(i); i--;
+                    libraryPathsList.RemoveAt(i);
+                    i--;
                 }
             }
             result.libraries = libraryPathsList.ToArray();
-
-            result.targetPlayerVersion = project.MovieOptions.Version + ".0";
-
+            result.targetPlayerVersion = string.Format("{0}.0", project.MovieOptions.Version);
             result.mainClass = project.GetAbsolutePath(project.CompileTargets[0]);
-
             result.flexSDKPath = project.CurrentSDK;
-
-            if (settingObject.FullConfig)
-            {
-                result.customConfigPath = project.GetAbsolutePath(configCopy);
-            }
-
-            String outputPath = project.OutputPath;
+            if (settingObject.FullConfig) result.customConfigPath = project.GetAbsolutePath(configCopy);
+            string outputPath = project.OutputPath;
             int lastSlash = outputPath.LastIndexOf(@"\");
             if (lastSlash > -1)
             {
                 result.outputPath = project.GetAbsolutePath(outputPath.Substring(0, lastSlash));
                 result.outputFileName = outputPath.Substring(lastSlash + 1);
             }
-
             else
             {
                 result.outputPath = project.GetAbsolutePath("");
                 result.outputFileName = outputPath;
             }
 
-            String[] sourcePaths = project.SourcePaths.Clone() as String[];
-            for (int i=0; i<sourcePaths.Length; i++) sourcePaths[i] = @"..\" + sourcePaths[i];
+            string[] sourcePaths = project.SourcePaths.Clone() as string[];
+            for (int i = 0; i < sourcePaths.Length; i++) sourcePaths[i] = string.Format(@"..\{0}", sourcePaths[i]);
             result.sources = sourcePaths;
 
             result.assets = AssetFolders;
-            for (int i=0; i<result.assets.Length; i++) result.assets[i] = @"..\" + project.GetRelativePath(result.assets[i]);
+            for (int i = 0; i < result.assets.Length; i++) result.assets[i] = string.Format(@"..\{0}", project.GetRelativePath(result.assets[i]));
 
             // size, frame rate and background color
-            String[] coltAdditionalOptionsKeys = {
+            string[] coltAdditionalOptionsKeys = {
                 "-default-size",
                 "-default-frame-rate",
                 "-default-background-color"
             };
-            String[] coltAdditionalOptions = {
-                coltAdditionalOptionsKeys[0] + " " + project.MovieOptions.Width + " " + project.MovieOptions.Height,
-                coltAdditionalOptionsKeys[1] + " " + project.MovieOptions.Fps,
-                coltAdditionalOptionsKeys[2] + " " + project.MovieOptions.BackgroundColorInt
+            string[] coltAdditionalOptions = {
+                string.Format("{0} {1} {2}", coltAdditionalOptionsKeys[0], project.MovieOptions.Width, project.MovieOptions.Height),
+                string.Format("{0} {1}", coltAdditionalOptionsKeys[1], project.MovieOptions.Fps),
+                string.Format("{0} {1}", coltAdditionalOptionsKeys[2], project.MovieOptions.BackgroundColorInt)
             };
 
-            String additionalOptions = "";
-            foreach (String option in project.CompilerOptions.Additional)
+            string additionalOptions = "";
+            foreach (string option in project.CompilerOptions.Additional)
             {
                 for (int i = 0; i < coltAdditionalOptionsKeys.Length; i++)
                 {
@@ -963,38 +864,34 @@ namespace ColtPlugin
                         coltAdditionalOptions[i] = "";
                     }
                 }
-                additionalOptions += option + " ";
+                additionalOptions += string.Format("{0} ", option);
             }
 
-            foreach (String option in coltAdditionalOptions)
+            foreach (string option in coltAdditionalOptions)
             {
-                additionalOptions += option + " ";
+                additionalOptions += string.Format("{0} ", option);
             }
 
 
             // compiler constants
             // see AddCompilerConstants in FDBuild's Building.AS3.FlexConfigWriter
-            Boolean debugMode = project.TraceEnabled;
-            Boolean isMobile = (project.MovieOptions.Platform == AS3MovieOptions.AIR_MOBILE_PLATFORM);
-            Boolean isDesktop = (project.MovieOptions.Platform == AS3MovieOptions.AIR_PLATFORM);
-
-            additionalOptions += "-define+=CONFIG::debug," + (debugMode ? "true" : "false") + " ";
-            additionalOptions += "-define+=CONFIG::release," + (debugMode ? "false" : "true") + " ";
-            additionalOptions += "-define+=CONFIG::timeStamp,\"'" + DateTime.Now.ToString("d") + "'\" ";
-            additionalOptions += "-define+=CONFIG::air," + (isMobile || isDesktop ? "true" : "false") + " ";
-            additionalOptions += "-define+=CONFIG::mobile," + (isMobile ? "true" : "false") + " ";
-            additionalOptions += "-define+=CONFIG::desktop," + (isDesktop ? "true" : "false") + " ";
-
+            bool debugMode = project.TraceEnabled;
+            bool isMobile = project.MovieOptions.Platform == "AIR Mobile";
+            bool isDesktop = !isMobile && project.MovieOptions.Platform == "AIR";
+            additionalOptions += string.Format("-define+=CONFIG::debug,{0} ", (debugMode ? "true" : "false"));
+            additionalOptions += string.Format("-define+=CONFIG::release,{0} ", (debugMode ? "false" : "true"));
+            additionalOptions += string.Format("-define+=CONFIG::timeStamp,\"'{0}'\" ", DateTime.Now.ToString("d"));
+            additionalOptions += string.Format("-define+=CONFIG::air,{0} ", (isMobile || isDesktop ? "true" : "false"));
+            additionalOptions += string.Format("-define+=CONFIG::mobile,{0} ", (isMobile ? "true" : "false"));
+            additionalOptions += string.Format("-define+=CONFIG::desktop,{0} ", (isDesktop ? "true" : "false"));
             if (project.CompilerOptions.CompilerConstants != null)
             {
                 foreach (string define in project.CompilerOptions.CompilerConstants)
                 {
-                    if (define.IndexOf(',') >= 0) additionalOptions += "-define+=" + define + " ";
+                    if (define.IndexOf(',') >= 0) additionalOptions += string.Format("-define+={0} ", define);
                 }
             }
-
-            result.compilerOptions = additionalOptions.Trim() + (debugMode ? " -debug" : "");
-
+            result.compilerOptions = string.Format("{0}{1}", additionalOptions.Trim(), (debugMode ? " -debug" : ""));
             return result;
         }
 	}

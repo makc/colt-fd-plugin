@@ -1,25 +1,20 @@
 ﻿using System;
-using System.Collections.Generic;
-using System.ComponentModel;
-using System.Data;
-using System.Drawing;
-using System.Text;
 using System.Windows.Forms;
 
 namespace ColtPlugin.Forms
 {
     public partial class FirstTimeDialog : Form
     {
-        public Boolean AutoRun = true;
-        public Boolean InterceptBuilds = false;
-        public String ShortCode = null;
+        public bool AutoRun = true;
+        public bool InterceptBuilds;
+        public string ShortCode;
 
         public FirstTimeDialog()
         {
             InitializeComponent();
         }
 
-        public FirstTimeDialog(Boolean interceptBuilds, Boolean autorun)
+        public FirstTimeDialog(bool interceptBuilds, bool autorun)
         {
             InitializeComponent();
             InterceptBuilds = checkBox1.Checked = interceptBuilds;
